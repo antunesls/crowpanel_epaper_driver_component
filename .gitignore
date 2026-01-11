@@ -28,3 +28,9 @@ sdkconfig
 sdkconfig.old
 dependencies.lock
 managed_components/
+
+# Component Publishing
+dist/
+*.tgz
+publish.sh
+PUBLISHING.md
