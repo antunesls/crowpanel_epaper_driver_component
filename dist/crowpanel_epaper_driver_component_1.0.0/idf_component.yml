@@ -1,0 +1,7 @@
+version: 1.0.0
+description: Driver component for CrowPanel E-Paper displays (4.2" and 2.13") 
+  with GUI functions
+dependencies:
+  idf:
+    version: '>=4.4.0'
+url: https://github.com/antunesls/crowpanel_epaper_driver_component

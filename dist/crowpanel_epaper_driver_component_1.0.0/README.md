@@ -30,14 +30,6 @@ ESP-IDF component driver for CrowPanel E-Paper displays with comprehensive GUI f
 idf.py add-dependency "antunesls/crowpanel_epaper_driver_component"
 ```
 
-Or add to your `idf_component.yml`:
-
-```yaml
-dependencies:
-  antunesls/crowpanel_epaper_driver_component:
-    version: "^1.0.0"
-```
-
 ### Manual Installation
 
 Clone this repository into your project's `components` directory:
