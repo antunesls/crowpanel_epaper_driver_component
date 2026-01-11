@@ -1,0 +1,30 @@
+# Build files
+build/
+*.o
+*.a
+*.so
+*.bin
+*.elf
+*.map
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# ESP-IDF
+sdkconfig
+sdkconfig.old
+dependencies.lock
+managed_components/
