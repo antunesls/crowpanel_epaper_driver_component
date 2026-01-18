@@ -57,6 +57,16 @@ static void EPD_WriteByte(uint8_t data) {
     spi_device_transmit(spi_handle, &t);
 }
 
+static void EPD_WriteBytes(const uint8_t *data, size_t len) {
+    if (spi_handle == NULL || len == 0) return;
+    
+    spi_transaction_t t = {
+        .length = len * 8, // length in bits
+        .tx_buffer = data
+    };
+    spi_device_transmit(spi_handle, &t);
+}
+
 static void EPD_WR_REG(uint8_t reg) {
     EPD_DC_0();
     EPD_CS_0();
@@ -69,6 +79,39 @@ static void EPD_WR_DATA8(uint8_t data) {
     EPD_CS_0();
     EPD_WriteByte(data);
     EPD_CS_1();
+}
+
+static void EPD_WR_DATA_BUFFER(const uint8_t *data, size_t len) {
+    if (len == 0) return;
+    EPD_DC_1();
+    EPD_CS_0();
+    EPD_WriteBytes(data, len);
+    EPD_CS_1();
+}
+
+static void EPD_WR_DATA_REPEAT(uint8_t data, size_t count) {
+    if (count == 0 || spi_handle == NULL) return;
+    
+    #define CHUNK_SIZE 128
+    uint8_t buffer[CHUNK_SIZE];
+    memset(buffer, data, CHUNK_SIZE);
+    
+    EPD_DC_1();
+    EPD_CS_0();
+    
+    size_t remaining = count;
+    while (remaining > 0) {
+        size_t current = (remaining > CHUNK_SIZE) ? CHUNK_SIZE : remaining;
+        spi_transaction_t t = {
+           .length = current * 8,
+           .tx_buffer = buffer
+        };
+        spi_device_transmit(spi_handle, &t);
+        remaining -= current;
+    }
+    
+    EPD_CS_1();
+    #undef CHUNK_SIZE
 }
 
 static void EPD_ReadBusy(void) {
@@ -341,55 +384,39 @@ void EPD_Init_Fast(uint8_t mode) {
 #endif
 
 void EPD_Clear(void) {
-    uint16_t i, j, Width, Height;
+    uint16_t Width, Height;
     Width = (EPD_W % 8 == 0) ? (EPD_W / 8) : (EPD_W / 8 + 1);
     Height = EPD_H;
     EPD_Init();
     
     EPD_WR_REG(0x24);
-    for (j = 0; j < Height; j++) {
-        for (i = 0; i < Width; i++) {
-            EPD_WR_DATA8(0xFF);
-        }
-    }
+    EPD_WR_DATA_REPEAT(0xFF, Width * Height);
 
     EPD_WR_REG(0x26);
-    for (j = 0; j < Height; j++) {
-        for (i = 0; i < Width; i++) {
-            EPD_WR_DATA8(0xFF);
-        }
-    }
+    EPD_WR_DATA_REPEAT(0xFF, Width * Height);
     EPD_Update();
 }
 
 void EPD_Display(const uint8_t *Image) {
-    uint16_t i, j, Width, Height;
+    uint16_t Width, Height;
     Width = (EPD_W % 8 == 0) ? (EPD_W / 8) : (EPD_W / 8 + 1);
     Height = EPD_H;
     EPD_WR_REG(0x24);
-    for (j = 0; j < Height; j++) {
-        for (i = 0; i < Width; i++) {
-            EPD_WR_DATA8(Image[i + j * Width]);
-        }
-    }
+    EPD_WR_DATA_BUFFER(Image, Width * Height);
     EPD_Update();
 }
 
 void EPD_Display_Fast(const uint8_t *Image) {
-    uint16_t i, j, Width, Height;
+    uint16_t Width, Height;
     Width = (EPD_W % 8 == 0) ? (EPD_W / 8) : (EPD_W / 8 + 1);
     Height = EPD_H;
     EPD_WR_REG(0x24);
-    for (j = 0; j < Height; j++) {
-        for (i = 0; i < Width; i++) {
-            EPD_WR_DATA8(Image[i + j * Width]);
-        }
-    }
+    EPD_WR_DATA_BUFFER(Image, Width * Height);
     EPD_Update_Fast();
 }
 
 void EPD_Display_Part(uint16_t x, uint16_t y, uint16_t sizex, uint16_t sizey, const uint8_t *Image) {
-    uint16_t Width, Height, i, j;
+    uint16_t Width, Height;
     Width = (sizex % 8 == 0) ? (sizex / 8) : (sizex / 8 + 1);
     Height = sizey;
     
@@ -405,11 +432,7 @@ void EPD_Display_Part(uint16_t x, uint16_t y, uint16_t sizex, uint16_t sizey, co
     EPD_SetCursor(x, y);
     
     EPD_WR_REG(0x24);
-    for (j = 0; j < Height; j++) {
-        for (i = 0; i < Width; i++) {
-            EPD_WR_DATA8(Image[i + j * Width]);
-        }
-    }
+    EPD_WR_DATA_BUFFER(Image, Width * Height);
     EPD_Update_Part();
 }
 
