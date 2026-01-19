@@ -218,7 +218,7 @@ static void EPD_Address_Set(uint16_t xs, uint16_t ys, uint16_t xe, uint16_t ye) 
 
 static void EPD_SetCursor(uint16_t xs, uint16_t ys) {
     EPD_WR_REG(0x4E); // SET_RAM_X_ADDRESS_COUNTER
-    EPD_WR_DATA8(xs & 0xFF);
+    EPD_WR_DATA8((xs >> 3) & 0xFF); // X address is in units of 8 pixels
 
     EPD_WR_REG(0x4F); // SET_RAM_Y_ADDRESS_COUNTER
     EPD_WR_DATA8(ys & 0xFF);
@@ -322,72 +322,89 @@ void EPD_Init(void) {
     EPD_WR_REG(0x12); // SW Reset
     EPD_ReadBusy();
 
-    EPD_WR_REG(0x01);    // Driver output control
-    EPD_WR_DATA8(0xF9); // (H-1) & 0xFF
-    EPD_WR_DATA8(0x00); // (H-1) >> 8
-    EPD_WR_DATA8(0x00); // Gate scan
+    EPD_WR_REG(0x01);    // Driver output control (Gate MUX)
+    EPD_WR_DATA8(0xF9); // (250-1) & 0xFF = 0xF9
+    EPD_WR_DATA8(0x00); // (250-1) >> 8 = 0x00
+    EPD_WR_DATA8(0x00); // Gate scan direction
 
     EPD_WR_REG(0x11); // Data entry mode
-    EPD_WR_DATA8(0x03); // X+ Y+
+    EPD_WR_DATA8(0x03); // X+ Y+ (increment both)
 
-    // The example uses 0x44/0x45 for address window setting
-    // But since EPD_Address_Set is dynamic, we just set the defaults used in init here
-    EPD_WR_REG(0x44); 
-    EPD_WR_DATA8(0x00);
-    EPD_WR_DATA8(0x0F); // (128/8)-1 = 15 = 0x0F ? 2.13 width is 122? 
-    // Example uses 0x0F (15*8 = 120 approx or 128)
+    // Set RAM address window - match physical display dimensions
+    EPD_WR_REG(0x44); // Set RAM X address start/end
+    EPD_WR_DATA8(0x00); // Start at 0
+    EPD_WR_DATA8(0x0F); // End at 15 (16*8=128 pixels, covers 122)
 
-    EPD_WR_REG(0x45);
-    EPD_WR_DATA8(0x00);
-    EPD_WR_DATA8(0x00);
-    EPD_WR_DATA8(0xF9); // 249
-    EPD_WR_DATA8(0x00);
+    EPD_WR_REG(0x45); // Set RAM Y address start/end
+    EPD_WR_DATA8(0x00); // Start low byte
+    EPD_WR_DATA8(0x00); // Start high byte
+    EPD_WR_DATA8(0xF9); // End low byte (249)
+    EPD_WR_DATA8(0x00); // End high byte
 
-    EPD_WR_REG(0x3C);   // Border
-    EPD_WR_DATA8(0x01); // 0x05 for 4.2", 0x01 for 2.13"
+    EPD_WR_REG(0x3C);   // Border waveform control
+    EPD_WR_DATA8(0x01); // White border for 2.13"
 
     EPD_ReadBusy();
 
-    EPD_WR_REG(0x18); // Temp Sensor
-    EPD_WR_DATA8(0x80); // Internal
+    EPD_WR_REG(0x18); // Temperature sensor control
+    EPD_WR_DATA8(0x80); // Internal sensor
 
-    EPD_Address_Set(0, 0, EPD_W - 1, EPD_H - 1);
-    EPD_SetCursor(0, 0); // Is this right for 2.13? Example code does: 4E->0, 4F->0
+    // Set initial cursor position
+    EPD_WR_REG(0x4E); // Set RAM X address counter
+    EPD_WR_DATA8(0x00);
+    
+    EPD_WR_REG(0x4F); // Set RAM Y address counter
+    EPD_WR_DATA8(0x00);
+    EPD_WR_DATA8(0x00);
     
     EPD_ReadBusy();
 }
 
 void EPD_Init_Fast(uint8_t mode) {
-    // Ported from EPD_HW_Init_Fast
     EPD_RESET();
-    // Delays are in RESET function
-    EPD_WR_REG(0x12);  // SWRESET
+    
+    EPD_WR_REG(0x12);  // SW Reset
     EPD_ReadBusy();   
     
-    EPD_WR_REG(0x18); // Internal Temp
-    EPD_WR_DATA8(0x80);  
+    EPD_WR_REG(0x18); // Temperature sensor control
+    EPD_WR_DATA8(0x80); // Internal sensor
         
-    EPD_WR_REG(0x22); // Load temperature value
-    EPD_WR_DATA8(0xB1);    
-    EPD_WR_REG(0x20); 
+    EPD_WR_REG(0x22); // Display Update Control 2
+    EPD_WR_DATA8(0xB1); // Load temperature value    
+    EPD_WR_REG(0x20); // Master Activation
     EPD_ReadBusy();   
 
-    EPD_WR_REG(0x1A); // Write to temperature register
-    EPD_WR_DATA8(0x64);    
+    EPD_WR_REG(0x1A); // Write temperature register
+    EPD_WR_DATA8(0x64); // Temperature value    
     EPD_WR_DATA8(0x00);  
             
-    EPD_WR_REG(0x22); // Load temperature value
-    EPD_WR_DATA8(0x91);    
-    EPD_WR_REG(0x20); 
+    EPD_WR_REG(0x22); // Display Update Control 2
+    EPD_WR_DATA8(0x91); // Load temperature value    
+    EPD_WR_REG(0x20); // Master Activation
     EPD_ReadBusy();
     
     // Configure data entry mode
     EPD_WR_REG(0x11); // Data entry mode
     EPD_WR_DATA8(0x03); // X+ Y+
     
-    // Set RAM address
-    EPD_Address_Set(0, 0, EPD_W - 1, EPD_H - 1);
-    EPD_SetCursor(0, 0);
+    // Set RAM address window
+    EPD_WR_REG(0x44); // Set RAM X address
+    EPD_WR_DATA8(0x00);
+    EPD_WR_DATA8(0x0F);
+    
+    EPD_WR_REG(0x45); // Set RAM Y address
+    EPD_WR_DATA8(0x00);
+    EPD_WR_DATA8(0x00);
+    EPD_WR_DATA8(0xF9);
+    EPD_WR_DATA8(0x00);
+    
+    // Set initial cursor
+    EPD_WR_REG(0x4E);
+    EPD_WR_DATA8(0x00);
+    EPD_WR_REG(0x4F);
+    EPD_WR_DATA8(0x00);
+    EPD_WR_DATA8(0x00);
+    
     EPD_ReadBusy();
 }
 #endif
@@ -413,8 +430,19 @@ void EPD_Display(const uint8_t *Image) {
     uint16_t Width, Height;
     Width = (EPD_W % 8 == 0) ? (EPD_W / 8) : (EPD_W / 8 + 1);
     Height = EPD_H;
+    
+#if defined(CONFIG_CROWPANEL_EPAPER_2_13_INCH)
+    // 2.13" display requires inverted pixel data
+    EPD_WR_REG(0x24);
+    for (uint32_t i = 0; i < Width * Height; i++) {
+        EPD_WR_DATA8(~Image[i]);
+    }
+#else
+    // 4.2" display uses normal pixel data
     EPD_WR_REG(0x24);
     EPD_WR_DATA_BUFFER(Image, Width * Height);
+#endif
+    
     EPD_Update();
 }
 
@@ -422,8 +450,19 @@ void EPD_Display_Fast(const uint8_t *Image) {
     uint16_t Width, Height;
     Width = (EPD_W % 8 == 0) ? (EPD_W / 8) : (EPD_W / 8 + 1);
     Height = EPD_H;
+    
+#if defined(CONFIG_CROWPANEL_EPAPER_2_13_INCH)
+    // 2.13" display requires inverted pixel data
+    EPD_WR_REG(0x24);
+    for (uint32_t i = 0; i < Width * Height; i++) {
+        EPD_WR_DATA8(~Image[i]);
+    }
+#else
+    // 4.2" display uses normal pixel data
     EPD_WR_REG(0x24);
     EPD_WR_DATA_BUFFER(Image, Width * Height);
+#endif
+    
     EPD_Update_Fast();
 }
 
@@ -453,14 +492,33 @@ void EPD_Display_Part(uint16_t x, uint16_t y, uint16_t sizex, uint16_t sizey, co
     
     // Write image data
     EPD_WR_REG(0x24); // Write RAM (BW)
+    
+#if defined(CONFIG_CROWPANEL_EPAPER_2_13_INCH)
+    // 2.13" display requires inverted pixel data
+    for (uint32_t i = 0; i < Width * Height; i++) {
+        EPD_WR_DATA8(~Image[i]);
+    }
+#else
+    // 4.2" display uses normal pixel data
     EPD_WR_DATA_BUFFER(Image, Width * Height);
+#endif
     
     EPD_Update_Part();
+    
+#if defined(CONFIG_CROWPANEL_EPAPER_2_13_INCH)
+    // After partial update on 2.13, restore border setting
+    EPD_WR_REG(0x3C);
+    EPD_WR_DATA8(0x01);
+#endif
 }
 
 void EPD_Sleep(void) {
     EPD_WR_REG(0x10);
     EPD_WR_DATA8(0x01);
+#if defined(CONFIG_CROWPANEL_EPAPER_2_13_INCH)
+    EPD_WR_REG(0x3C);
+    EPD_WR_DATA8(0x01);
+#endif
     delay(50);
 }
 
