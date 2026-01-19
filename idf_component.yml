@@ -1,4 +1,4 @@
-version: "1.0.3"
+version: "1.0.4"
 description: "Driver component for CrowPanel E-Paper displays (4.2\" and 2.13\") with GUI functions"
 url: "https://github.com/antunesls/crowpanel_epaper_driver_component"
 dependencies:
