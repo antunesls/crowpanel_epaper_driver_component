@@ -379,7 +379,16 @@ void EPD_Init_Fast(uint8_t mode) {
     EPD_WR_REG(0x22); // Load temperature value
     EPD_WR_DATA8(0x91);    
     EPD_WR_REG(0x20); 
-    EPD_ReadBusy();   
+    EPD_ReadBusy();
+    
+    // Configure data entry mode
+    EPD_WR_REG(0x11); // Data entry mode
+    EPD_WR_DATA8(0x03); // X+ Y+
+    
+    // Set RAM address
+    EPD_Address_Set(0, 0, EPD_W - 1, EPD_H - 1);
+    EPD_SetCursor(0, 0);
+    EPD_ReadBusy();
 }
 #endif
 
@@ -389,11 +398,14 @@ void EPD_Clear(void) {
     Height = EPD_H;
     EPD_Init();
     
-    EPD_WR_REG(0x24);
+    // Write to both NEW (0x24) and OLD (0x26) data buffers
+    // This is essential for partial/fast refresh to work correctly
+    EPD_WR_REG(0x24); // Write RAM (NEW data)
     EPD_WR_DATA_REPEAT(0xFF, Width * Height);
 
-    EPD_WR_REG(0x26);
+    EPD_WR_REG(0x26); // Write RAM (OLD data)
     EPD_WR_DATA_REPEAT(0xFF, Width * Height);
+    
     EPD_Update();
 }
 
@@ -420,19 +432,29 @@ void EPD_Display_Part(uint16_t x, uint16_t y, uint16_t sizex, uint16_t sizey, co
     Width = (sizex % 8 == 0) ? (sizex / 8) : (sizex / 8 + 1);
     Height = sizey;
     
+    // Configure border and display update control
     EPD_WR_REG(0x3C); // BorderWavefrom
     EPD_WR_DATA8(0x80);
-    EPD_WR_REG(0x21);
+    
+    EPD_WR_REG(0x21); // Display update control
     EPD_WR_DATA8(0x00);
     EPD_WR_DATA8(0x00);
-    EPD_WR_REG(0x3C);
+    
+    EPD_WR_REG(0x3C); // BorderWavefrom
     EPD_WR_DATA8(0x80);
     
+    // Set data entry mode
+    EPD_WR_REG(0x11); // Data entry mode
+    EPD_WR_DATA8(0x03); // X+ Y+
+    
+    // Set address window
     EPD_Address_Set(x, y, x + sizex - 1, y + sizey - 1);
     EPD_SetCursor(x, y);
     
-    EPD_WR_REG(0x24);
+    // Write image data
+    EPD_WR_REG(0x24); // Write RAM (BW)
     EPD_WR_DATA_BUFFER(Image, Width * Height);
+    
     EPD_Update_Part();
 }
 
@@ -538,7 +560,19 @@ void EPD_ShowPicture(uint16_t x, uint16_t y, uint16_t sizex, uint16_t sizey, con
 }
 
 void clear_all(void) {
-   EPD_Clear();
+    uint16_t Width, Height;
+    Width = (EPD_W % 8 == 0) ? (EPD_W / 8) : (EPD_W / 8 + 1);
+    Height = EPD_H;
+    
+    // Standard clear sequence
+    EPD_Clear();
+    
+    // Reinitialize paint buffer
+    Paint_NewImage(Paint.Image, EPD_W, EPD_H, 0, WHITE);
+    EPD_Full(WHITE);
+    
+    // Partial display to complete the clear
+    EPD_Display_Part(0, 0, EPD_W, EPD_H, Paint.Image);
 }
 
 // Clear a rectangular window
