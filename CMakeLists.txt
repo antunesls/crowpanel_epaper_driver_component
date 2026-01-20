@@ -1,3 +1,3 @@
-idf_component_register(SRCS "epaper_fonts_data.c" "epaper_driver.c"
+idf_component_register(SRCS "epaper_driver.c" "epaper_fonts_data.c"
                        INCLUDE_DIRS "include"
-                       REQUIRES driver)
+                       REQUIRES driver esp_timer log)

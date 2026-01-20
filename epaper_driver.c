@@ -7,6 +7,7 @@
 #include "esp_log.h"
 #include <string.h>
 #include "sdkconfig.h" 
+#include "esp_heap_caps.h"
 
 static const char *TAG = "epaper_driver";
 
@@ -14,17 +15,10 @@ static const char *TAG = "epaper_driver";
 Paint_t Paint;
 
 // SPI Device Handle
-static spi_device_handle_t spi_handle = NULL;
+spi_device_handle_t spi_handle = NULL;
 
 // Macro mappings from Kconfig
-#define EPD_SPI_HOST        (CONFIG_CROWPANEL_EPAPER_SPI_HOST + 1) // 0->SPI1 is not safe usually? Kconfig said 1=SPI2
-// Kconfig default is 1. IF SPI2_HOST is 1 (which it usually is in IDF enums? No, implementation dependent)
-// Let's use direct casting if user provides 1 for SPI2_HOST
-// Actually, in idf: SPI1_HOST=0, SPI2_HOST=1, SPI3_HOST=2.
-// My Kconfig logic: 1=SPI2_HOST. So I should cast (CONFIG... - 1)?
-// NO, let's just assume the user enters the integer mapping to the enum.
-// Safe bet: SPI2_HOST is typically 1.
-
+#define EPD_SPI_HOST        (CONFIG_CROWPANEL_EPAPER_SPI_HOST + 1)
 #define SPI_HOST_ID         (CONFIG_CROWPANEL_EPAPER_SPI_HOST == 1 ? SPI2_HOST : SPI3_HOST)
 
 #define PIN_CS              CONFIG_CROWPANEL_EPAPER_SPI_CS
@@ -115,14 +109,20 @@ static void EPD_WR_DATA_REPEAT(uint8_t data, size_t count) {
 }
 
 static void EPD_ReadBusy(void) {
-    // ESP_LOGD(TAG, "Wait Busy...");
+    ESP_LOGI(TAG, "Waiting for BUSY pin (GPIO %d) to go LOW...", PIN_BUSY);
+    int timeout = 0;
     while (1) {
-        if (EPD_ReadBUSY == 0) {
+        int busy_state = EPD_ReadBUSY;
+        if (busy_state == 0) {
+            ESP_LOGI(TAG, "BUSY pin is LOW - ready");
+            break;
+        }
+        if (timeout++ > 500) { // 5 seconds timeout
+            ESP_LOGW(TAG, "BUSY pin timeout! Pin is still HIGH after 5s");
             break;
         }
         vTaskDelay(pdMS_TO_TICKS(10));
     }
-    // ESP_LOGD(TAG, "Busy Free");
 }
 
 static void EPD_RESET(void) {
@@ -136,8 +136,12 @@ static void EPD_RESET(void) {
 
 // Power Management
 void EPD_PowerOn(void) {
-    if (PIN_PWR < 0) return;
+    if (PIN_PWR < 0) {
+        ESP_LOGW(TAG, "Power pin not configured (PIN_PWR < 0)");
+        return;
+    }
     
+    ESP_LOGI(TAG, "Turning ON display power (GPIO %d)", PIN_PWR);
     // Configure Power Pin if not done
     gpio_config_t power_conf = {
         .pin_bit_mask = (1ULL << PIN_PWR),
@@ -148,14 +152,18 @@ void EPD_PowerOn(void) {
     };
     gpio_config(&power_conf);
     gpio_set_level(PIN_PWR, 1);
-    delay(100);
+    ESP_LOGI(TAG, "Power ON - waiting 200ms for stabilization");
+    delay(200); // Increased from 100ms to 200ms
 }
 
 void EPD_GPIOInit(void) {
     ESP_LOGI(TAG, "Initializing GPIO and SPI");
+    ESP_LOGI(TAG, "Pin configuration: MOSI=%d, CLK=%d, CS=%d, DC=%d, RST=%d, BUSY=%d, PWR=%d",
+             PIN_MOSI, PIN_CLK, PIN_CS, PIN_DC, PIN_RST, PIN_BUSY, PIN_PWR);
 
     // Initialize Power Pin
     EPD_PowerOn();
+    vTaskDelay(pdMS_TO_TICKS(10)); // Wait for power to stabilize
 
     // Initialize GPIOs
     gpio_config_t io_conf = {
@@ -230,7 +238,7 @@ static void EPD_Update(void) {
 #if defined(CONFIG_CROWPANEL_EPAPER_4_2_INCH)
     EPD_WR_DATA8(0xF7);
 #elif defined(CONFIG_CROWPANEL_EPAPER_2_13_INCH)
-    EPD_WR_DATA8(0xF4);
+    EPD_WR_DATA8(0xF7); // Changed to 0xF7 to match working Arduino example
 #else 
     EPD_WR_DATA8(0xF7); // Default
 #endif
@@ -313,47 +321,50 @@ void EPD_Init_Fast(uint8_t mode) {
 
 #elif defined(CONFIG_CROWPANEL_EPAPER_2_13_INCH)
 // ==========================================
-// 2.13 Inch Initialization (SSD1680)
+// 2.13 Inch Initialization (Corrected for Portrait Controller 122x250)
 // ==========================================
 void EPD_Init(void) {
     EPD_RESET();
-    EPD_ReadBusy(); // Wait for HW reset
+    EPD_ReadBusy();
     
     EPD_WR_REG(0x12); // SW Reset
     EPD_ReadBusy();
 
-    EPD_WR_REG(0x01);    // Driver output control (Gate MUX)
-    EPD_WR_DATA8(0xF9); // (250-1) & 0xFF = 0xF9
-    EPD_WR_DATA8(0x00); // (250-1) >> 8 = 0x00
-    EPD_WR_DATA8(0x00); // Gate scan direction
+    // Driver output control (Gate MUX)
+    EPD_WR_REG(0x01);
+    EPD_WR_DATA8(0xF9); // (250-1) & 0xFF = 0xF9 -> MUX lines = 250
+    EPD_WR_DATA8(0x00);
+    EPD_WR_DATA8(0x00);
 
-    EPD_WR_REG(0x11); // Data entry mode
-    EPD_WR_DATA8(0x03); // X+ Y+ (increment both)
+    // Data entry mode
+    EPD_WR_REG(0x11);
+    EPD_WR_DATA8(0x03); // X+ Y+
 
-    // Set RAM address window - match physical display dimensions
-    EPD_WR_REG(0x44); // Set RAM X address start/end
-    EPD_WR_DATA8(0x00); // Start at 0
-    EPD_WR_DATA8(0x0F); // End at 15 (16*8=128 pixels, covers 122)
+    // Set RAM address window - 122(W) x 250(H) Physical
+    EPD_WR_REG(0x44); 
+    EPD_WR_DATA8(0x00);
+    EPD_WR_DATA8(0x0F); // 15 * 8 = 120 (approx 122)
 
-    EPD_WR_REG(0x45); // Set RAM Y address start/end
-    EPD_WR_DATA8(0x00); // Start low byte
-    EPD_WR_DATA8(0x00); // Start high byte
-    EPD_WR_DATA8(0xF9); // End low byte (249)
-    EPD_WR_DATA8(0x00); // End high byte
+    EPD_WR_REG(0x45); 
+    EPD_WR_DATA8(0x00); // Start Y Low
+    EPD_WR_DATA8(0x00); // Start Y High
+    EPD_WR_DATA8(0xF9); // End Y Low (249)
+    EPD_WR_DATA8(0x00); // End Y High
 
-    EPD_WR_REG(0x3C);   // Border waveform control
-    EPD_WR_DATA8(0x01); // White border for 2.13"
-
+    // Border
+    EPD_WR_REG(0x3C);
+    EPD_WR_DATA8(0x01);
+    
     EPD_ReadBusy();
 
-    EPD_WR_REG(0x18); // Temperature sensor control
-    EPD_WR_DATA8(0x80); // Internal sensor
+    // Temp sensor
+    EPD_WR_REG(0x18);
+    EPD_WR_DATA8(0x80);
 
-    // Set initial cursor position
-    EPD_WR_REG(0x4E); // Set RAM X address counter
+    // Reset Cursor
+    EPD_WR_REG(0x4E);
     EPD_WR_DATA8(0x00);
-    
-    EPD_WR_REG(0x4F); // Set RAM Y address counter
+    EPD_WR_REG(0x4F);
     EPD_WR_DATA8(0x00);
     EPD_WR_DATA8(0x00);
     
@@ -387,15 +398,15 @@ void EPD_Init_Fast(uint8_t mode) {
     EPD_WR_REG(0x11); // Data entry mode
     EPD_WR_DATA8(0x03); // X+ Y+
     
-    // Set RAM address window
+    // Set RAM address window - 250x122 landscape
     EPD_WR_REG(0x44); // Set RAM X address
     EPD_WR_DATA8(0x00);
-    EPD_WR_DATA8(0x0F);
+    EPD_WR_DATA8(0x1F); // 31 (32*8=256, covers 250)
     
     EPD_WR_REG(0x45); // Set RAM Y address
     EPD_WR_DATA8(0x00);
     EPD_WR_DATA8(0x00);
-    EPD_WR_DATA8(0xF9);
+    EPD_WR_DATA8(0x79); // 121 (122-1)
     EPD_WR_DATA8(0x00);
     
     // Set initial cursor
@@ -410,20 +421,45 @@ void EPD_Init_Fast(uint8_t mode) {
 #endif
 
 void EPD_Clear(void) {
-    uint16_t Width, Height;
-    Width = (EPD_W % 8 == 0) ? (EPD_W / 8) : (EPD_W / 8 + 1);
-    Height = EPD_H;
+    uint32_t size;
+#if defined(CONFIG_CROWPANEL_EPAPER_4_2_INCH)
+    uint16_t Width = (EPD_W % 8 == 0) ? (EPD_W / 8) : (EPD_W / 8 + 1);
+    size = Width * EPD_H;
+#elif defined(CONFIG_CROWPANEL_EPAPER_2_13_INCH)
+    // Physical: 122(W) x 250(H). 122 requires 16 bytes (128 bits).
+    size = 16 * 250; // 4000 bytes
+#else
+    uint16_t Width = (EPD_W % 8 == 0) ? (EPD_W / 8) : (EPD_W / 8 + 1);
+    size = Width * EPD_H;
+#endif
+
     EPD_Init();
     
     // Write to both NEW (0x24) and OLD (0x26) data buffers
-    // This is essential for partial/fast refresh to work correctly
     EPD_WR_REG(0x24); // Write RAM (NEW data)
-    EPD_WR_DATA_REPEAT(0xFF, Width * Height);
+    EPD_WR_DATA_REPEAT(0xFF, size);
 
     EPD_WR_REG(0x26); // Write RAM (OLD data)
-    EPD_WR_DATA_REPEAT(0xFF, Width * Height);
+    EPD_WR_DATA_REPEAT(0xFF, size);
     
     EPD_Update();
+}
+
+void EPD_Clear_R26H(void) {
+    uint32_t size;
+#if defined(CONFIG_CROWPANEL_EPAPER_4_2_INCH)
+    uint16_t Width = (EPD_W % 8 == 0) ? (EPD_W / 8) : (EPD_W / 8 + 1);
+    size = Width * EPD_H;
+#elif defined(CONFIG_CROWPANEL_EPAPER_2_13_INCH)
+    size = 16 * 250; // 4000 bytes
+#else
+    uint16_t Width = (EPD_W % 8 == 0) ? (EPD_W / 8) : (EPD_W / 8 + 1);
+    size = Width * EPD_H;
+#endif
+    
+    ESP_LOGI(TAG, "Clearing R26H (OLD data buffer)");
+    EPD_WR_REG(0x26); // Write RAM (OLD data)
+    EPD_WR_DATA_REPEAT(0xFF, size);
 }
 
 void EPD_Display(const uint8_t *Image) {
@@ -432,18 +468,70 @@ void EPD_Display(const uint8_t *Image) {
     Height = EPD_H;
     
 #if defined(CONFIG_CROWPANEL_EPAPER_2_13_INCH)
-    // 2.13" display requires inverted pixel data
-    EPD_WR_REG(0x24);
-    for (uint32_t i = 0; i < Width * Height; i++) {
-        EPD_WR_DATA8(~Image[i]);
+    // 2.13" display requires 90 degree rotation and coordinate mapping
+    // Logical: 250(W) x 122(H). Physical: 122(W) x 250(H).
+    
+    // Allocate buffer for physical frame (122x250 pixels)
+    // 122 pixels wide -> 16 bytes per line. 250 lines. = 4000 bytes.
+    size_t phys_buf_size = 4000;
+    uint8_t *phys_buf = heap_caps_malloc(phys_buf_size, MALLOC_CAP_DMA);
+    if (!phys_buf) {
+        ESP_LOGE(TAG, "Failed to allocate rotation buffer");
+        return;
     }
+    memset(phys_buf, 0xFF, phys_buf_size); // Initialize to White
+
+    uint16_t log_stride = (EPD_W + 7) / 8; // 32 bytes for 250 pixels
+
+    // Determine physical buffer dimensions
+    // Physical Width (Gate) = 122 (16 bytes)
+    // Physical Height (Source) = 250
+    
+    for (uint16_t y_phys = 0; y_phys < 250; y_phys++) {
+        for (uint16_t x_phys_byte = 0; x_phys_byte < 16; x_phys_byte++) {
+            uint8_t byte_to_send = 0x00;
+            
+            for (uint8_t bit = 0; bit < 8; bit++) {
+                uint16_t x_phys = x_phys_byte * 8 + bit;
+                
+                if (x_phys >= 122) { // Out of physical bounds
+                    byte_to_send |= (1 << (7 - bit)); // White filler
+                    continue;
+                }
+                
+                // Rotation Mapping
+                // x_phys correlates to y_log
+                // y_phys correlates to (249 - x_log)
+                // Therefore: x_log = 249 - y_phys
+                
+                uint16_t y_log = x_phys;
+                uint16_t x_log = 249 - y_phys;
+                
+                // Read from Logical Image Buffer
+                uint32_t log_idx = y_log * log_stride + (x_log / 8);
+                uint8_t log_bit = 7 - (x_log % 8);
+                
+                if (Image[log_idx] & (1 << log_bit)) {
+                    // Pixel is White
+                    byte_to_send |= (1 << (7 - bit));
+                }
+            }
+            phys_buf[y_phys * 16 + x_phys_byte] = byte_to_send;
+        }
+    }
+
+    EPD_WR_REG(0x24);
+    EPD_WR_DATA_BUFFER(phys_buf, phys_buf_size);
+    
+    free(phys_buf);
+    EPD_Update();
+    // EPD_Clear_R26H() was redundant in simple driver, skipping for speed unless needed
 #else
     // 4.2" display uses normal pixel data
     EPD_WR_REG(0x24);
     EPD_WR_DATA_BUFFER(Image, Width * Height);
-#endif
-    
     EPD_Update();
+#endif
 }
 
 void EPD_Display_Fast(const uint8_t *Image) {

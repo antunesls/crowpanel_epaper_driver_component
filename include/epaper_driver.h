@@ -14,10 +14,8 @@ extern "C" {
 #define EPD_W 400
 #define EPD_H 300
 #elif defined(CONFIG_CROWPANEL_EPAPER_2_13_INCH)
-// Default orientation 0? The example code has rotation logic.
-// Base hardware resolution seems to be 122x250.
-// Standardizing on "Logic" width/height.
-// If typical use is landscape:
+// Hardware resolution for 2.13" display in landscape orientation (native)
+// Physical dimensions: 250 pixels wide x 122 pixels tall
 #define EPD_W 250
 #define EPD_H 122
 #else
@@ -66,6 +64,7 @@ void EPD_Sleep(void);
 void EPD_Init(void);
 void EPD_Init_Fast(uint8_t mode);
 void EPD_Clear(void);
+void EPD_Clear_R26H(void);
 void EPD_Display(const uint8_t *Image);
 void EPD_Display_Part(uint16_t x, uint16_t y, uint16_t sizex, uint16_t sizey, const uint8_t *Image);
 void EPD_Display_Fast(const uint8_t *Image);
