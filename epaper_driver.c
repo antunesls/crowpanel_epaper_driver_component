@@ -109,12 +109,10 @@ static void EPD_WR_DATA_REPEAT(uint8_t data, size_t count) {
 }
 
 static void EPD_ReadBusy(void) {
-    ESP_LOGI(TAG, "Waiting for BUSY pin (GPIO %d) to go LOW...", PIN_BUSY);
     int timeout = 0;
     while (1) {
         int busy_state = EPD_ReadBUSY;
         if (busy_state == 0) {
-            ESP_LOGI(TAG, "BUSY pin is LOW - ready");
             break;
         }
         if (timeout++ > 500) { // 5 seconds timeout
@@ -141,7 +139,6 @@ void EPD_PowerOn(void) {
         return;
     }
     
-    ESP_LOGI(TAG, "Turning ON display power (GPIO %d)", PIN_PWR);
     // Configure Power Pin if not done
     gpio_config_t power_conf = {
         .pin_bit_mask = (1ULL << PIN_PWR),
@@ -152,15 +149,10 @@ void EPD_PowerOn(void) {
     };
     gpio_config(&power_conf);
     gpio_set_level(PIN_PWR, 1);
-    ESP_LOGI(TAG, "Power ON - waiting 200ms for stabilization");
     delay(200); // Increased from 100ms to 200ms
 }
 
 void EPD_GPIOInit(void) {
-    ESP_LOGI(TAG, "Initializing GPIO and SPI");
-    ESP_LOGI(TAG, "Pin configuration: MOSI=%d, CLK=%d, CS=%d, DC=%d, RST=%d, BUSY=%d, PWR=%d",
-             PIN_MOSI, PIN_CLK, PIN_CS, PIN_DC, PIN_RST, PIN_BUSY, PIN_PWR);
-
     // Initialize Power Pin
     EPD_PowerOn();
     vTaskDelay(pdMS_TO_TICKS(10)); // Wait for power to stabilize
@@ -457,7 +449,6 @@ void EPD_Clear_R26H(void) {
     size = Width * EPD_H;
 #endif
     
-    ESP_LOGI(TAG, "Clearing R26H (OLD data buffer)");
     EPD_WR_REG(0x26); // Write RAM (OLD data)
     EPD_WR_DATA_REPEAT(0xFF, size);
 }
